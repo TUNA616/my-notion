@@ -2238,6 +2238,18 @@ function newDb(parent,props={}){
 /* body every new item of a database starts with (db.tplBlocks); pictures, files and sub-page links are not kept in it */
 const TPL_SKIP=new Set(['image','file','page']);
 function tplClone(bl){const a=Array.isArray(bl)?bl.filter(b=>b&&!TPL_SKIP.has(b.type)).map(b=>({...clone(b),id:uid()})):[];return a.length?a:[B('p')]}
+/* duplicate an item with everything that makes it look the same; placed right after the original.
+   dateTo moves the copy to another day (keeps the period length and times) */
+function dupRow(db,r,dateTo){
+  const c=newRow(db,clone(r.props||{}),r.title);
+  c.icon=r.icon||'';c.blocks=(r.blocks&&r.blocks.length?clone(r.blocks):[B('p')]).map(b=>({...b,id:uid()}));
+  ['hl','ownSchema','hideProps','cover'].forEach(k=>{if(r[k]!=null)c[k]=clone(r[k])});
+  if(Array.isArray(c.ownSchema)){const map={};c.ownSchema=c.ownSchema.map(p=>{const n={...p,id:uid()};map[p.id]=n.id;return n});
+    const pr={};Object.entries(c.props||{}).forEach(([k,v])=>{pr[map[k]||k]=v});c.props=pr}
+  if(dateTo){const dp=(db.schema||[]).find(p=>p.type==='date'&&(c.props||{})[p.id]&&dateTo.prop===p.id)||null;if(dp)c.props={...c.props,[dp.id]:dvShift(c.props[dp.id],dateTo.date)}}
+  const ch=db.children;const i=ch.indexOf(c.id),k=ch.indexOf(r.id);if(i>=0&&k>=0){ch.splice(i,1);ch.splice(k+1,0,c.id)}
+  markDirty(c.id);touch(db.id,true);return c;
+}
 function newRow(db,props={},title=''){
   const r={id:uid(),row:true,title,icon:'',parent:db.id,children:[],props:{...props},blocks:tplClone(db.tplBlocks),open:false,created:Date.now(),updated:Date.now()};
   S.pages[r.id]=r;db.children.push(r.id);markDirty(r.id);touch(db.id,true);return r;
@@ -4353,10 +4365,14 @@ function openCalHi(anchor,db,date){
   m.addEventListener('focusout',e=>{if(e.target.id==='hiNote')setTimeout(()=>renderDbBody(db),0)});
 }
 function openChipHi(pt,db,r){
-  const draw=()=>{const h=r.hl||{};return `<div class="mh">‘${esc(r.title||'제목 없음')}’ 강조</div><div class="mh sm">배경 강조 (글자는 흰색)</div>${calPal('data-cbg',h.bg)}<div class="mh sm">글자색만</div>${calPal('data-ctc',h.tc)}<div class="mi" data-cclr="1"><span class="bi s">⌫</span>강조 지우기</div><div class="mi" data-copen="1"><span class="bi s">↗</span>열기</div>`};
+  const draw=()=>{const h=r.hl||{};return `<div class="mh">‘${esc(r.title||'제목 없음')}’ 강조</div><div class="mh sm">배경 강조 (글자는 흰색)</div>${calPal('data-cbg',h.bg)}<div class="mh sm">글자색만</div>${calPal('data-ctc',h.tc)}<div class="mi" data-cclr="1"><span class="bi s">⌫</span>강조 지우기</div><div class="mh"></div><div class="mi" data-cdup="same"><span class="bi s">⧉</span>복제 (같은 날)</div><div class="mi" data-cdup="next"><span class="bi s">⧉</span>다음 날로 복제</div><div class="mi" data-cdup="week"><span class="bi s">⧉</span>다음 주 같은 요일로 복제</div><div class="mi" data-copen="1"><span class="bi s">↗</span>열기</div><div class="mi" data-cdel="1" style="color:var(--danger)"><span class="bi s">🗑</span>삭제 (휴지통으로)</div>`};
   const m=menu(box,draw(),{width:'250px'});place(m,{left:pt.x+2,top:pt.y,bottom:pt.y});
-  m.onclick=e=>{const b=e.target.closest('[data-cbg],[data-ctc],[data-cclr],[data-copen]');if(!b)return;
+  m.onclick=e=>{const b=e.target.closest('[data-cbg],[data-ctc],[data-cclr],[data-copen],[data-cdup],[data-cdel]');if(!b)return;
     if(b.dataset.copen!==undefined){closeAll();openItem(r.id,'row');return}
+    if(b.dataset.cdel!==undefined){closeAll();trashRows([r.id]);return}
+    if(b.dataset.cdup){closeAll();const view=curView(db);const dp=db.schema.find(x=>x.id===view.dateProp&&x.type==='date')||db.schema.find(x=>x.type==='date');
+      const v=dp&&(r.props||{})[dp.id];let to=null;if(v&&b.dataset.cdup!=='same'){const n=b.dataset.cdup==='next'?1:7;const d=new Date(dvStart(v)+'T00:00:00');d.setDate(d.getDate()+n);to={prop:dp.id,date:ymd(d)}}
+      const c=dupRow(db,r,to);renderDbBody(db);toast(`‘${r.title||'제목 없음'}’을(를) ${b.dataset.cdup==='same'?'같은 날에':b.dataset.cdup==='next'?'다음 날로':'다음 주로'} 복제했어요. 서식도 같아요.`,{label:'열기',fn:()=>openItem(c.id,'row')});return}
     if(b.dataset.cclr!==undefined)delete r.hl;
     else if(b.dataset.cbg!==undefined){if(b.dataset.cbg)r.hl={bg:b.dataset.cbg};else delete r.hl}
     else if(b.dataset.ctc!==undefined){if(b.dataset.ctc)r.hl={tc:b.dataset.ctc};else delete r.hl}
@@ -4693,7 +4709,7 @@ function openRowMenu(r,db,anchor,pt){
     if(a==='open')openItem(r.id,'row');
     if(a==='full')go(r.id);
     if(a==='del')trashRows(multi?[...RSEL]:[r.id]);
-    if(a==='dup'){const c=newRow(db,clone(r.props||{}),r.title);c.icon=r.icon;c.blocks=clone(r.blocks).map(b=>({...b,id:uid()}));markDirty(c.id);renderPage()}};
+    if(a==='dup'){dupRow(db,r);renderPage();toast(`‘${r.title||'제목 없음'}’을(를) 복제했어요.`)}};
 }
 function trashRows(ids){
   ids=ids.filter(id=>S.pages[id]&&!S.pages[id].trashed);if(!ids.length)return;
@@ -6634,6 +6650,6 @@ if(mobile())document.body.classList.add('noside');
 boot();
 </script>
 
-<!-- # 2026-11-15 23:46 (KST) · 고려대학교 대학원생 신동원 제작 -->
+<!-- # 2026-11-20 11:49 (KST) · 고려대학교 대학원생 신동원 제작 -->
 </body>
 </html>

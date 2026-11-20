@@ -10,7 +10,7 @@ Notion처럼 쓰는 **개인용 지식 관리 웹앱**이에요. 설치할 것 �
 
 ## 바로 써 보기
 
-**👉 [My Notion 열기](https://TUNA616.github.io/my-notion/)**
+**👉 [My Notion 열기](https://YOUR-ID.github.io/my-notion/)**
 
 링크를 열면 바로 쓸 수 있어요. 이 방식에서는 내용이 **지금 쓰는 브라우저에만** 저장돼요.
 
